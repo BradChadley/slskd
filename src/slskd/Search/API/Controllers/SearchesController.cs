@@ -157,8 +157,11 @@ namespace slskd.Search.API
         }
 
         /// <summary>
-        ///     Gets the state of the search corresponding to the specified <paramref name="id"/>.
+        ///     Gets the responses of the search corresponding to the specified <paramref name="id"/>.
         /// </summary>
+        /// <remarks>
+        ///     While the search is in progress, returns the responses received so far.
+        /// </remarks>
         /// <param name="id">The unique id of the search.</param>
         /// <returns></returns>
         /// <response code="200">The request completed successfully.</response>
@@ -170,6 +173,11 @@ namespace slskd.Search.API
             if (Program.IsRelayAgent)
             {
                 return Forbid();
+            }
+
+            if (Searches.TryGetResponsesInProgress(id, out var responsesInProgress))
+            {
+                return Ok(responsesInProgress);
             }
 
             var search = await Searches.FindAsync(search => search.Id == id, includeResponses: true);

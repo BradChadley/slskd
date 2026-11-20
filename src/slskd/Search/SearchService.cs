@@ -80,6 +80,15 @@ namespace slskd.Search
         Task<List<Search>> ListAsync(Expression<Func<Search, bool>> expression = null);
 
         /// <summary>
+        ///     Returns the responses received so far by the search matching the specified <paramref name="id"/>,
+        ///     if it is in progress.
+        /// </summary>
+        /// <param name="id">The unique identifier for the search.</param>
+        /// <param name="responses">The responses received so far, if the search is in progress.</param>
+        /// <returns>A value indicating whether the search is in progress.</returns>
+        bool TryGetResponsesInProgress(Guid id, out IEnumerable<Response> responses);
+
+        /// <summary>
         ///     Updates the specified <paramref name="search"/>.
         /// </summary>
         /// <remark>
@@ -139,6 +148,9 @@ namespace slskd.Search
 
         private ConcurrentDictionary<Guid, CancellationTokenSource> CancellationTokens { get; }
             = new ConcurrentDictionary<Guid, CancellationTokenSource>();
+
+        private ConcurrentDictionary<Guid, ConcurrentQueue<SearchResponse>> ResponsesInProgress { get; }
+            = new ConcurrentDictionary<Guid, ConcurrentQueue<SearchResponse>>();
 
         private ISoulseekClient Client { get; }
         private IDbContextFactory<SearchDbContext> ContextFactory { get; }
@@ -274,6 +286,10 @@ namespace slskd.Search
                 // responses arrive concurrently from many connections, so this must be thread safe
                 ConcurrentQueue<SearchResponse> responses = new();
 
+                // make the responses available to callers while the search is in progress; removed once the
+                // responses have been persisted with the completed search
+                ResponsesInProgress.TryAdd(id, responses);
+
                 options ??= new SearchOptions();
                 options = options.WithActions(
                     stateChanged: (args) =>
@@ -377,6 +393,7 @@ namespace slskd.Search
                     {
                         rateLimiter.Dispose();
                         CancellationTokens.TryRemove(id, out _);
+                        ResponsesInProgress.TryRemove(id, out _);
                     }
                 });
 
@@ -405,6 +422,25 @@ namespace slskd.Search
 
                 throw;
             }
+        }
+
+        /// <summary>
+        ///     Returns the responses received so far by the search matching the specified <paramref name="id"/>,
+        ///     if it is in progress.
+        /// </summary>
+        /// <param name="id">The unique identifier for the search.</param>
+        /// <param name="responses">The responses received so far, if the search is in progress.</param>
+        /// <returns>A value indicating whether the search is in progress.</returns>
+        public bool TryGetResponsesInProgress(Guid id, out IEnumerable<Response> responses)
+        {
+            if (ResponsesInProgress.TryGetValue(id, out var queue))
+            {
+                responses = queue.ToArray().Select(r => Response.FromSoulseekSearchResponse(r)).ToList();
+                return true;
+            }
+
+            responses = null;
+            return false;
         }
 
         /// <summary>
